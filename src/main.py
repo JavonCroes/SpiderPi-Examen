@@ -19,7 +19,7 @@ VALID_MODES = {"0": "Idle", "1": "AprilTag", "2": "Face", "3": "Color"}
 
 
 class RobotTracker:
-    def __init__(self, mode: str = "Idle", stream_port: int = 8080):
+    def __init__(self, mode: str = "Idle", stream_port: int = 8082):
         self._camera = Camera().start()
         self._gimbal = GimbalControl()
         self._stream = MJPEGServer(port=stream_port, quality=50, fps_limit=20)
@@ -47,31 +47,16 @@ class RobotTracker:
         self._annotated: cv.typing.MatLike | None = None
         self._annotated_lock = threading.Lock()
 
-    @property
-    def _processor(self) -> VisionProcessor:
-        return self._processors[self._mode]
-
     def _switch_mode(self, mode: str) -> None:
         self._mode = mode
 
-        for pid in [self._pid_pan, self._pid_tilt]:
-            pid.clear()
+        self._pid_pan.clear()
+        self._pid_tilt.clear()
 
         if mode == "Idle":
             self._gimbal.center()
-            print("Switched to Idle mode")
-            return
 
-        kp, ki, kd = 0.20, 0.01, 0.04
-        limits = (-40, 40)
-
-        for pid in [self._pid_pan, self._pid_tilt]:
-            pid.Kp = kp
-            pid.Ki = ki
-            pid.Kd = kd
-            pid.output_limits = limits
-
-        print(f"Switched to {mode} mode (Kp={kp}, Limit={limits[1]})")
+        print(f"Switched to {mode} mode")
 
     def _handle_tracking(
         self, error_x: float, error_y: float, found: bool, dt: float
@@ -144,18 +129,21 @@ class RobotTracker:
             last_time = now
             fps_history.append(dt)
 
-            if self._mode == "Idle":
+            # Read mode once: another thread may switch it mid-iteration, and
+            # the property lookup self._processors[mode] has no "Idle" key.
+            mode = self._mode
+            if mode == "Idle":
                 annotated = frame
                 error_x = error_y = 0.0
                 found = False
             else:
-                annotated, error_x, error_y, found = self._processor.get_error(frame)
+                annotated, error_x, error_y, found = self._processors[mode].get_error(frame)
                 self._handle_tracking(error_x, error_y, found, dt)
 
             fps = 1.0 / (sum(fps_history) / len(fps_history))
             cv.putText(
                 annotated,
-                f"{self._mode} | {fps:.1f} fps",
+                f"{mode} | {fps:.1f} fps",
                 (10, 30),
                 cv.FONT_HERSHEY_SIMPLEX,
                 0.8,

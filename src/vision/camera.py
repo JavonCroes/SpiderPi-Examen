@@ -12,9 +12,11 @@ class Camera:
         self._cap.set(cv.CAP_PROP_FRAME_WIDTH, width)
         self._cap.set(cv.CAP_PROP_FRAME_HEIGHT, height)
         self._cap.set(cv.CAP_PROP_FPS, 30)
-        self._cap.set(cv.CAP_PROP_BUFFERSIZE, 1)
+        # NB: do NOT force CAP_PROP_BUFFERSIZE=1 — on this UVC camera's V4L2 driver
+        # a single buffer drops throughput from ~22fps to ~17fps. The capture thread
+        # below already drains continuously and keeps only the latest frame, so a
+        # deeper driver buffer adds no real latency.
         self._frame = None
-        self._seq = 0
         self._lock = threading.Lock()
         self._new_frame = threading.Event()
         self._running = False
@@ -32,15 +34,9 @@ class Camera:
             if ret:
                 with self._lock:
                     self._frame = frame
-                    self._seq += 1
                 self._new_frame.set()
             else:
                 time.sleep(0.03)
-
-    @property
-    def seq(self) -> int:
-        with self._lock:
-            return self._seq
 
     def wait_new(self, timeout: float = 0.5) -> bool:
         """Block until a new frame arrives. Returns False on timeout."""

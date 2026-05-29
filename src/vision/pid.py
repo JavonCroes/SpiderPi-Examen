@@ -14,6 +14,7 @@ class PID:
         self._min, self._max = output_limits
         self._integral = 0.0
         self._prev_error = 0.0
+        self._first = True
 
     @property
     def output_limits(self) -> tuple[float | None, float | None]:
@@ -26,6 +27,7 @@ class PID:
     def clear(self) -> None:
         self._integral = 0.0
         self._prev_error = 0.0
+        self._first = True
 
     def update(self, measurement: float, dt: float = 0.03) -> float:
         error = self.setpoint - measurement
@@ -38,7 +40,13 @@ class PID:
             if self._min is not None:
                 self._integral = max(self._integral, self._min / self.Ki)
 
-        derivative = (error - self._prev_error) / dt
+        # Skip the derivative on the first update after a clear/reset so a fresh
+        # large error doesn't produce a derivative kick that slams the output.
+        if self._first:
+            derivative = 0.0
+            self._first = False
+        else:
+            derivative = (error - self._prev_error) / dt
         output = self.Kp * error + self.Ki * self._integral + self.Kd * derivative
 
         if self._max is not None:
