@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Protocol
 
-# The encrypted kinematics 
+# The encrypted kinematics
 _SDK_PATHS = (
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk",
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk/common",
@@ -61,7 +61,7 @@ class ChassisController:
             if path not in sys.path:
                 sys.path.append(path)
         try:
-            import kinematics  # type: ignore[import-not-found]  # encrypted 
+            import kinematics  # type: ignore[import-not-found]  # encrypted
         except ImportError as exc:
             raise ImportError(
                 "Hiwonder 'kinematics' library not found on the SDK path "
