@@ -8,6 +8,7 @@ import time
 
 import cv2 as cv
 
+from movement.chassis import Chassis, ChassisController, StubChassis, TurnDirection
 from vision.camera import Camera
 from vision.pid import PID
 from vision.processor import AprilTagProcessor, ColorProcessor, FaceProcessor, VisionProcessor
@@ -17,12 +18,30 @@ from vision.stream import MJPEGServer
 DEADZONE = 15
 VALID_MODES = {"0": "Idle", "1": "AprilTag", "2": "Face", "3": "Color"}
 
+# Body-rotation handoff (Color mode only). Once the pan servo is pinned at a
+# limit for PAN_LIMIT_FRAMES consecutive frames, the chassis turns; it keeps
+# turning until the gimbal has re-centered RECENTER_MARGIN servo-units back from
+# the limit. Both thresholds add hysteresis so the body does not toggle at the
+# boundary.
+PAN_LIMIT_FRAMES = 5
+RECENTER_MARGIN = 400
+
 
 class RobotTracker:
     def __init__(self, mode: str = "Idle", stream_port: int = 8082):
         self._camera = Camera().start()
         self._gimbal = GimbalControl()
         self._stream = MJPEGServer(port=stream_port, quality=50, fps_limit=20)
+
+        # Chassis rotation shares the gimbal's single serial Board (see
+        # GimbalControl) and is the "body takes over" half of the pan handoff.
+        # Swap ChassisController -> StubChassis here to test off-hardware; it
+        # also falls back to the stub automatically when the IK SDK is absent.
+        try:
+            self._chassis: Chassis = ChassisController(self._gimbal.board)
+        except ImportError as exc:
+            print(f"Chassis rotation disabled, using stub: {exc}")
+            self._chassis = StubChassis()
 
         self._processors: dict[str, VisionProcessor] = {
             "AprilTag": AprilTagProcessor(),
@@ -39,6 +58,12 @@ class RobotTracker:
         self._pid_tilt = PID(
             Kp=0.20, Ki=0.01, Kd=0.04, setpoint=0, output_limits=(-40, 40)
         )
+
+        # Pan-limit hysteresis state, consumed by _handle_pan_limit.
+        self._pan_limit_count = 0
+        self._chassis_active = False
+        self._chassis_dir: TurnDirection | None = None
+
         self._switch_mode(self._mode)
 
         self._infer_frame: cv.typing.MatLike | None = None
@@ -52,11 +77,81 @@ class RobotTracker:
 
         self._pid_pan.clear()
         self._pid_tilt.clear()
+        self._reset_chassis()
 
         if mode == "Idle":
             self._gimbal.center()
 
         print(f"Switched to {mode} mode")
+
+    def _reset_chassis(self) -> None:
+        """Stop any rotation and clear the pan-limit hysteresis (mode switches)."""
+        self._set_chassis_active(False)
+        self._pan_limit_count = 0
+
+    def _set_chassis_active(self, active: bool, direction: TurnDirection | None = None) -> None:
+        if active:
+            assert direction is not None, "direction is required when activating rotation"
+            self._chassis_active = True
+            self._chassis_dir = direction
+        else:
+            # Guard: only command a stand if we were actually rotating, so a
+            # mode switch doesn't needlessly run a gait cycle. The chassis and a
+            # future MovementController share this bus and must not move at once.
+            if self._chassis_active:
+                self._chassis.stop()
+            self._chassis_active = False
+            self._chassis_dir = None
+
+    def _handle_pan_limit(self, pan_pos: int, found: bool) -> None:
+        """Hand pan tracking off to body rotation when the gimbal runs out of travel.
+
+        Implements images/flowchart_chassis_rotatie.png (Color mode only). When
+        the target is found AND the pan servo is pinned at a limit for
+        PAN_LIMIT_FRAMES consecutive frames, the body rotates toward that side.
+        Direction is the empirically-verified mapping (matches the flowchart):
+        on this robot the gimbal pans toward PAN_MIN to follow a target on the
+        RIGHT, so PAN_MIN -> turn RIGHT and PAN_MAX -> turn LEFT. It keeps
+        turning until the gimbal has re-centered RECENTER_MARGIN servo-units back
+        from the limit -- not just one tick off it -- so it does not toggle.
+        """
+        gimbal = self._gimbal
+
+        # No target: cancel any rotation and reset the counter.
+        if not found:
+            self._set_chassis_active(False)
+            self._pan_limit_count = 0
+            return
+
+        if not self._chassis_active:
+            at_max = pan_pos >= gimbal.PAN_MAX
+            at_min = pan_pos <= gimbal.PAN_MIN
+            if not (at_max or at_min):
+                # Off the limit: the gimbal alone is coping, reset the counter.
+                self._pan_limit_count = 0
+                return
+            # Pinned at a limit: require N stable frames before taking over.
+            self._pan_limit_count += 1
+            if self._pan_limit_count < PAN_LIMIT_FRAMES:
+                return
+            # Empirical mapping (see docstring): PAN_MIN -> RIGHT, PAN_MAX -> LEFT.
+            direction = TurnDirection.RIGHT if at_min else TurnDirection.LEFT
+            self._set_chassis_active(True, direction)
+            self._chassis.turn(direction)
+        else:
+            # Already rotating: stop once the gimbal has re-centered comfortably,
+            # measured against the limit we were pinned at (RIGHT was PAN_MIN).
+            direction = self._chassis_dir
+            assert direction is not None  # always set while _chassis_active is True
+            if direction is TurnDirection.RIGHT:
+                recentered = pan_pos >= gimbal.PAN_MIN + RECENTER_MARGIN
+            else:
+                recentered = pan_pos <= gimbal.PAN_MAX - RECENTER_MARGIN
+            if recentered:
+                self._set_chassis_active(False)
+                self._pan_limit_count = 0
+            else:
+                self._chassis.turn(direction)
 
     def _handle_tracking(
         self, error_x: float, error_y: float, found: bool, dt: float
@@ -139,6 +234,10 @@ class RobotTracker:
             else:
                 annotated, error_x, error_y, found = self._processors[mode].get_error(frame)
                 self._handle_tracking(error_x, error_y, found, dt)
+                # The body-rotation handoff is scoped to Color mode (the tracked
+                # target for this feature); the pan position is already clamped.
+                if mode == "Color":
+                    self._handle_pan_limit(self._gimbal.pan_pos, found)
 
             fps = 1.0 / (sum(fps_history) / len(fps_history))
             cv.putText(
@@ -190,6 +289,7 @@ class RobotTracker:
         finally:
             self._camera.stop()
             self._stream.stop()
+            self._chassis.shutdown()  # stop rotating, stand, join the worker
             self._gimbal.center()
             if self._restart_requested:
                 print("Restarting...")
