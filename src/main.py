@@ -10,9 +10,12 @@ import cv2 as cv
 
 from vision.camera import Camera
 from vision.pid import PID
-from vision.processor import AprilTagProcessor, ColorProcessor, FaceProcessor, VisionProcessor
+from vision.processor import AprilTagProcessor, FaceProcessor, ColorProcessor, VisionProcessor
 from vision.servo import GimbalControl
 from vision.stream import MJPEGServer
+
+from movement.movement import MovementController
+from movement.chassis import TurnDirection
 
 DEADZONE = 15
 VALID_MODES = {"0": "Idle", "1": "AprilTag", "2": "Face", "3": "Color"}
@@ -24,11 +27,13 @@ class RobotTracker:
         self._gimbal = GimbalControl()
         self._stream = MJPEGServer(port=stream_port, quality=50, fps_limit=20)
 
+        self._movement = MovementController(board=self._gimbal._board)
         self._processors: dict[str, VisionProcessor] = {
             "AprilTag": AprilTagProcessor(),
             "Face": FaceProcessor(draw_landmarks=False),
             "Color": ColorProcessor(),
         }
+
         self._mode = mode
         self._running = True
         self._restart_requested = False
@@ -39,6 +44,7 @@ class RobotTracker:
         self._pid_tilt = PID(
             Kp=0.20, Ki=0.01, Kd=0.04, setpoint=0, output_limits=(-40, 40)
         )
+
         self._switch_mode(self._mode)
 
         self._infer_frame: cv.typing.MatLike | None = None
@@ -56,11 +62,7 @@ class RobotTracker:
         if mode == "Idle":
             self._gimbal.center()
 
-        print(f"Switched to {mode} mode")
-
-    def _handle_tracking(
-        self, error_x: float, error_y: float, found: bool, dt: float
-    ) -> None:
+    def _handle_tracking(self, error_x: float, error_y: float, found: bool, dt: float) -> None:
         if not found:
             self._pid_pan.clear()
             self._pid_tilt.clear()
@@ -78,18 +80,20 @@ class RobotTracker:
             self._gimbal.move(pan_move, tilt_move)
 
     def _read_input(self) -> None:
-        print(
-            "Commands: '0' = Idle | '1' = AprilTag | '2' = Face | '3' = Color | 'r' = Reset | 'q' = Quit"
-        )
+        print("Commands: 0 Idle | 1 AprilTag | 2 Face | 3 Color | r Reset | q Quit")
+
         for line in sys.stdin:
             cmd = line.strip()
+
             if cmd == "q":
                 self._running = False
                 break
+
             if cmd == "r":
                 self._restart_requested = True
                 self._running = False
                 break
+
             mode = VALID_MODES.get(cmd)
             if mode:
                 self._switch_mode(mode)
@@ -100,15 +104,39 @@ class RobotTracker:
                 cmd = self._stream.commands.get(timeout=0.5)
             except queue.Empty:
                 continue
+
             if cmd == "quit":
                 self._running = False
                 break
+
             if cmd == "reset":
                 self._restart_requested = True
                 self._running = False
                 break
+
             if cmd in ("Idle", "AprilTag", "Face", "Color"):
                 self._switch_mode(cmd)
+
+            if cmd == "forward":
+                self._movement.forward()
+
+            elif cmd == "backward":
+                self._movement.backward()
+
+            elif cmd == "left":
+                self._movement.strafe_left()
+
+            elif cmd == "right":
+                self._movement.strafe_right()
+
+            elif cmd == "turn_left":
+                self._movement.turn(TurnDirection.LEFT)
+
+            elif cmd == "turn_right":
+                self._movement.turn(TurnDirection.RIGHT)
+
+            elif cmd == "stop":
+                self._movement.stop()
 
     def _inference_loop(self) -> None:
         last_time = time.monotonic()
@@ -117,10 +145,12 @@ class RobotTracker:
         while self._running:
             if not self._infer_ready.wait(timeout=0.5):
                 continue
+
             self._infer_ready.clear()
 
             with self._infer_lock:
                 frame = self._infer_frame
+
             if frame is None:
                 continue
 
@@ -129,9 +159,8 @@ class RobotTracker:
             last_time = now
             fps_history.append(dt)
 
-            # Read mode once: another thread may switch it mid-iteration, and
-            # the property lookup self._processors[mode] has no "Idle" key.
             mode = self._mode
+
             if mode == "Idle":
                 annotated = frame
                 error_x = error_y = 0.0
@@ -141,6 +170,7 @@ class RobotTracker:
                 self._handle_tracking(error_x, error_y, found, dt)
 
             fps = 1.0 / (sum(fps_history) / len(fps_history))
+
             cv.putText(
                 annotated,
                 f"{mode} | {fps:.1f} fps",
@@ -150,6 +180,7 @@ class RobotTracker:
                 (255, 255, 255),
                 2,
             )
+
             if found:
                 cv.putText(
                     annotated,
@@ -166,6 +197,7 @@ class RobotTracker:
 
     def run(self) -> None:
         self._stream.start()
+
         threading.Thread(target=self._read_input, daemon=True).start()
         threading.Thread(target=self._process_web_commands, daemon=True).start()
         threading.Thread(target=self._inference_loop, daemon=True).start()
@@ -181,25 +213,28 @@ class RobotTracker:
 
                 with self._infer_lock:
                     self._infer_frame = frame
+
                 self._infer_ready.set()
 
                 with self._annotated_lock:
                     to_send = self._annotated
+
                 self._stream.update_frame(to_send if to_send is not None else frame)
 
         finally:
+            self._movement.shutdown()
             self._camera.stop()
             self._stream.stop()
             self._gimbal.center()
+
             if self._restart_requested:
-                print("Restarting...")
                 os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="SpiderPi face/AprilTag tracker")
     p.add_argument("--mode", choices=["Idle", "AprilTag", "Face", "Color"], default="Idle")
-    p.add_argument("--port", type=int, default=8082, help="MJPEG stream port")
+    p.add_argument("--port", type=int, default=8082)
     return p.parse_args()
 
 

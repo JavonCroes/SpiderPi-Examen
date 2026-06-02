@@ -7,7 +7,7 @@ import cv2 as cv
 class Camera:
     """Threaded camera capture — always returns the latest frame without blocking."""
 
-    def __init__(self, src: int = 0, width: int = 640, height: int = 480):
+    def __init__(self, src: int = 1, width: int = 640, height: int = 480):
         self._cap = cv.VideoCapture(src)
         self._cap.set(cv.CAP_PROP_FRAME_WIDTH, width)
         self._cap.set(cv.CAP_PROP_FRAME_HEIGHT, height)
