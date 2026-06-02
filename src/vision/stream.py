@@ -150,7 +150,9 @@ class MJPEGServer:
                             frame = stream._get_frame()
 
                             if frame is not None:
-                                buf = stream._jpeg.encode(frame, quality=stream._quality)
+                                buf: bytes = stream._jpeg.encode(  # type: ignore[assignment]
+                                    frame, quality=stream._quality
+                                )
 
                                 self.wfile.write(
                                     b"--frame\r\nContent-Type: image/jpeg\r\n\r\n"

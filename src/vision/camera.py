@@ -7,15 +7,11 @@ import cv2 as cv
 class Camera:
     """Threaded camera capture — always returns the latest frame without blocking."""
 
-    def __init__(self, src: int = 1, width: int = 640, height: int = 480):
+    def __init__(self, src: int = 0, width: int = 640, height: int = 480):
         self._cap = cv.VideoCapture(src)
         self._cap.set(cv.CAP_PROP_FRAME_WIDTH, width)
         self._cap.set(cv.CAP_PROP_FRAME_HEIGHT, height)
         self._cap.set(cv.CAP_PROP_FPS, 30)
-        # NB: do NOT force CAP_PROP_BUFFERSIZE=1 — on this UVC camera's V4L2 driver
-        # a single buffer drops throughput from ~22fps to ~17fps. The capture thread
-        # below already drains continuously and keeps only the latest frame, so a
-        # deeper driver buffer adds no real latency.
         self._frame = None
         self._lock = threading.Lock()
         self._new_frame = threading.Event()

@@ -6,7 +6,7 @@ import threading
 import time
 from typing import Protocol
 
-# The encrypted kinematics
+# Robot-only paths for the encrypted kinematics .so and its `common` package.
 _SDK_PATHS = (
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk",
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk/common",
@@ -54,9 +54,7 @@ class ChassisController:
 
     @staticmethod
     def _make_ik(board):
-        """import and instantiate the encrypted IK library.Raises a clear error
-        if the library is missing so the caller can fall back to a stub.
-        """
+        """Lazily load the encrypted IK library; raise ImportError so the caller can stub."""
         for path in _SDK_PATHS:
             if path not in sys.path:
                 sys.path.append(path)
