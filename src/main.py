@@ -10,7 +10,6 @@ import cv2 as cv
 
 from movement.chassis import Chassis, ChassisController, StubChassis, TurnDirection
 
-# US-04 is a teammate's module; import defensively so its failure can't take us down.
 try:
     from movement.movement import MovementController
 except Exception as exc:  # noqa: BLE001
@@ -19,7 +18,12 @@ except Exception as exc:  # noqa: BLE001
 
 from vision.camera import Camera
 from vision.pid import PID
-from vision.processor import AprilTagProcessor, FaceProcessor, ColorProcessor, VisionProcessor
+from vision.processor import (
+    AprilTagProcessor,
+    ColorProcessor,
+    FaceProcessor,
+    VisionProcessor,
+)
 from vision.servo import GimbalControl
 from vision.stream import MJPEGServer
 
@@ -38,8 +42,6 @@ class RobotTracker:
         self._gimbal = GimbalControl()
         self._stream = MJPEGServer(port=stream_port, quality=50, fps_limit=20)
 
-        # US-04 shares the gimbal's Board; construct defensively so its failure
-        # disables only manual movement, never tracking or US-01 rotation.
         self._movement = None
         if MovementController is not None:
             try:
@@ -101,13 +103,17 @@ class RobotTracker:
         self._set_chassis_active(False)
         self._pan_limit_count = 0
 
-    def _set_chassis_active(self, active: bool, direction: TurnDirection | None = None) -> None:
+    def _set_chassis_active(
+        self, active: bool, direction: TurnDirection | None = None
+    ) -> None:
         if active:
-            assert direction is not None, "direction is required when activating rotation"
+            assert direction is not None, (
+                "direction is required when activating rotation"
+            )
             self._chassis_active = True
             self._chassis_dir = direction
         else:
-            # Only stand if we were actually rotating (avoids a needless gait).
+            # Only stand if we were actually rotating.
             if self._chassis_active:
                 self._chassis.stop()
             self._chassis_active = False
@@ -130,14 +136,12 @@ class RobotTracker:
             at_max = pan_pos >= gimbal.PAN_MAX
             at_min = pan_pos <= gimbal.PAN_MIN
             if not (at_max or at_min):
-                # Off the limit: the gimbal alone is coping, reset the counter.
                 self._pan_limit_count = 0
                 return
-            # Pinned at a limit: require N stable frames before taking over.
             self._pan_limit_count += 1
             if self._pan_limit_count < PAN_LIMIT_FRAMES:
                 return
-            # Empirical mapping (see docstring): PAN_MIN -> RIGHT, PAN_MAX -> LEFT.
+            # Empirical mapping PAN_MIN -> RIGHT, PAN_MAX -> LEFT.
             direction = TurnDirection.RIGHT if at_min else TurnDirection.LEFT
             self._set_chassis_active(True, direction)
             self._chassis.turn(direction)
@@ -212,7 +216,6 @@ class RobotTracker:
             if cmd in ("Idle", "AprilTag", "Face", "Color"):
                 self._switch_mode(cmd)
 
-            # Manual movement (US-04), only if the teammate module loaded.
             if self._movement is not None:
                 if cmd == "forward":
                     self._movement.forward()
@@ -263,9 +266,10 @@ class RobotTracker:
                 error_x = error_y = 0.0
                 found = False
             else:
-                annotated, error_x, error_y, found = self._processors[mode].get_error(frame)
+                annotated, error_x, error_y, found = self._processors[mode].get_error(
+                    frame
+                )
                 self._handle_tracking(error_x, error_y, found, dt)
-                # Body-rotation handoff is Color-mode only.
                 if mode == "Color":
                     self._handle_pan_limit(self._gimbal.pan_pos, found)
 
@@ -322,7 +326,6 @@ class RobotTracker:
                 self._stream.update_frame(to_send if to_send is not None else frame)
 
         finally:
-            # Shut US-04 down defensively so it can't skip our own cleanup.
             if self._movement is not None:
                 try:
                     self._movement.shutdown()
@@ -331,7 +334,7 @@ class RobotTracker:
 
             self._camera.stop()
             self._stream.stop()
-            self._chassis.shutdown()  # stop rotating, stand, join worker
+            self._chassis.shutdown()
             self._gimbal.center()
 
             if self._restart_requested:
@@ -341,7 +344,9 @@ class RobotTracker:
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="SpiderPi face/AprilTag tracker")
-    p.add_argument("--mode", choices=["Idle", "AprilTag", "Face", "Color"], default="Idle")
+    p.add_argument(
+        "--mode", choices=["Idle", "AprilTag", "Face", "Color"], default="Idle"
+    )
     p.add_argument("--port", type=int, default=8082)
     return p.parse_args()
 
