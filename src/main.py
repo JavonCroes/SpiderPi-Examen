@@ -98,6 +98,7 @@ class RobotTracker:
         if mode == "Idle":
             self._gimbal.center()
 
+        self._stream.set_status("IDLE" if mode == "Idle" else "SEARCHING")
         print(f"Switched to {mode} mode")
 
     def _set_color_from_hsv(self, payload: str) -> None:
@@ -125,6 +126,7 @@ class RobotTracker:
             )
             self._chassis_active = True
             self._chassis_dir = direction
+            self._stream.set_status(f"ROTATING {direction.name}")
         else:
             if self._chassis_active:
                 self._chassis.stop()
@@ -288,6 +290,11 @@ class RobotTracker:
                 self._handle_tracking(error_x, error_y, found, dt)
                 if mode == "Color":
                     self._handle_pan_limit(self._gimbal.pan_pos, found)
+
+            if mode == "Idle":
+                self._stream.set_status("IDLE")
+            elif not self._chassis_active:
+                self._stream.set_status("TRACKING" if found else "SEARCHING")
 
             fps = 1.0 / (sum(fps_history) / len(fps_history))
 
