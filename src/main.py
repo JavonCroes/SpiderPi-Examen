@@ -30,10 +30,12 @@ from vision.stream import MJPEGServer
 DEADZONE = 15
 VALID_MODES = {"0": "Idle", "1": "AprilTag", "2": "Face", "3": "Color"}
 
-# Body-rotation handoff hysteresis (Color mode): frames pinned at a pan limit
-# before turning, and servo-units the gimbal must re-center before stopping.
 PAN_LIMIT_FRAMES = 5
 RECENTER_MARGIN = 400
+
+HUE_TOL = 15
+SAT_TOL = 100
+VAL_TOL = 120
 
 
 class RobotTracker:
@@ -49,17 +51,17 @@ class RobotTracker:
             except Exception as exc:  # noqa: BLE001
                 print(f"Manual movement (US-04) disabled: {exc}")
 
-        # Chassis shares the gimbal's Board; falls back to the stub off-hardware.
         try:
             self._chassis: Chassis = ChassisController(self._gimbal.board)
         except ImportError as exc:
             print(f"Chassis rotation disabled, using stub: {exc}")
             self._chassis = StubChassis()
 
+        self._color = ColorProcessor()
         self._processors: dict[str, VisionProcessor] = {
             "AprilTag": AprilTagProcessor(),
             "Face": FaceProcessor(draw_landmarks=False),
-            "Color": ColorProcessor(),
+            "Color": self._color,
         }
 
         self._mode = mode
@@ -98,6 +100,17 @@ class RobotTracker:
 
         print(f"Switched to {mode} mode")
 
+    def _set_color_from_hsv(self, payload: str) -> None:
+        try:
+            h, s, v = (int(x) for x in payload.split(","))
+        except ValueError:
+            print(f"Ignoring malformed color payload: {payload!r}")
+            return
+        h = max(0, min(179, h))
+        lower = (max(0, h - HUE_TOL), max(0, s - SAT_TOL), max(0, v - VAL_TOL))
+        upper = (min(179, h + HUE_TOL), 255, 255)
+        self._color.set_color(lower, upper)
+
     def _reset_chassis(self) -> None:
         """Stop any rotation and clear the pan-limit hysteresis (mode switches)."""
         self._set_chassis_active(False)
@@ -113,7 +126,6 @@ class RobotTracker:
             self._chassis_active = True
             self._chassis_dir = direction
         else:
-            # Only stand if we were actually rotating.
             if self._chassis_active:
                 self._chassis.stop()
             self._chassis_active = False
@@ -126,7 +138,7 @@ class RobotTracker:
         """
         gimbal = self._gimbal
 
-        # No target: cancel any rotation and reset the counter.
+        # No target: cancel any rotation and reset the counter
         if not found:
             self._set_chassis_active(False)
             self._pan_limit_count = 0
@@ -148,7 +160,7 @@ class RobotTracker:
         else:
             # Rotating: stop once the gimbal has re-centered past the margin.
             direction = self._chassis_dir
-            assert direction is not None  # always set while _chassis_active is True
+            assert direction is not None 
             if direction is TurnDirection.RIGHT:
                 recentered = pan_pos >= gimbal.PAN_MIN + RECENTER_MARGIN
             else:
@@ -212,6 +224,10 @@ class RobotTracker:
                 self._restart_requested = True
                 self._running = False
                 break
+
+            if cmd.startswith("color:"):
+                self._set_color_from_hsv(cmd[len("color:"):])
+                continue
 
             if cmd in ("Idle", "AprilTag", "Face", "Color"):
                 self._switch_mode(cmd)
@@ -309,6 +325,9 @@ class RobotTracker:
         try:
             while self._running:
                 if not self._camera.wait_new(timeout=0.5):
+                    if self._chassis_active:
+                        print("No camera frames; stopping chassis rotation")
+                        self._reset_chassis()
                     continue
 
                 ret, frame = self._camera.read()

@@ -6,7 +6,6 @@ import threading
 import time
 from typing import Protocol
 
-# Robot-only paths for the encrypted kinematics .so and its `common` package.
 _SDK_PATHS = (
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk",
     "/home/pi/spiderpi/spiderpi_sdk/common_sdk/common",
@@ -14,15 +13,11 @@ _SDK_PATHS = (
 
 
 class TurnDirection(enum.Enum):
-    """Direction the body rotates in place."""
-
     LEFT = "left"
     RIGHT = "right"
 
 
 class Chassis(Protocol):
-    """Interface shared by the real controller and the test stub."""
-
     @property
     def is_moving(self) -> bool: ...
 
@@ -36,8 +31,6 @@ class Chassis(Protocol):
 
 
 class ChassisController:
-    """Rotates the hexapod body in place via the Hiwonder IK gait library."""
-
     def __init__(self, board, angle: int = 20, speed: int = 60):
         self._board = board
         self._angle = angle
@@ -54,7 +47,6 @@ class ChassisController:
 
     @staticmethod
     def _make_ik(board):
-        """Lazily load the encrypted IK library; raise ImportError so the caller can stub."""
         for path in _SDK_PATHS:
             if path not in sys.path:
                 sys.path.append(path)
@@ -73,7 +65,6 @@ class ChassisController:
         return self._is_moving
 
     def is_rotating(self) -> bool:
-        """Whether the body is currently mid-rotation (alias of ``is_moving``)."""
         return self._is_moving
 
     def turn(self, direction: TurnDirection) -> None:
@@ -82,16 +73,12 @@ class ChassisController:
         self._wake.set()
 
     def stop(self) -> None:
-        """Request a halt and a return to a neutral stand. Non-blocking."""
         with self._lock:
             self._desired = None
         self._wake.set()
 
     def shutdown(self) -> None:
-        """Stop, stand, and join the worker thread (blocking; for process exit)."""
         self.stop()
-        # Let the worker finish its current step and stand on its own thread --
-        # never drive the IK from another thread, the bus is shared.
         deadline = time.monotonic() + 3.0
         while self._is_moving and time.monotonic() < deadline:
             time.sleep(0.05)
@@ -106,14 +93,11 @@ class ChassisController:
             with self._lock:
                 direction = self._desired
             if direction is None:
-                # Nothing requested: stand if we were moving, then sleep.
                 if self._is_moving:
                     self._ik.stand(self._ik.initial_pos)
                     self._is_moving = False
                 self._wake.clear()
                 continue
-            # One small, blocking gait step; the request is re-read next loop so
-            # turning continues (still set) or stops (cleared) without stalling.
             self._is_moving = True
             try:
                 # Args: posture, mode (2 = hexapod), angle (deg), speed, repeats (1).
@@ -125,7 +109,7 @@ class ChassisController:
                     self._ik.turn_right(
                         self._ik.initial_pos, 2, self._angle, self._speed, 1
                     )
-            except Exception as exc:  # keep the worker alive on a transient SDK error
+            except Exception as exc:  
                 print(f"Chassis turn failed: {exc}")
                 self._wake.clear()
 

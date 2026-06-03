@@ -4,7 +4,6 @@ from hiwonder.ros_robot_controller_sdk import Board
 
 
 def _serialize_board_writes(board: Board) -> None:
-    """Lock the Board's writer so gimbal + leg writes can't interleave (idempotent)."""
     if getattr(board, "_buf_write_locked", False):
         return
     lock = threading.Lock()
@@ -24,7 +23,7 @@ class GimbalControl:
     CENTER = 1500
 
     def __init__(self, pan_id: int = 2, tilt_id: int = 1, board: Board | None = None):
-        # Share one Board across gimbal + chassis; a second one corrupts the bus.
+        # Share one Board across gimbal + chassis a second one corrupts the bus.
         self._board = board or Board()
         _serialize_board_writes(self._board)
         self._pan_id = pan_id
