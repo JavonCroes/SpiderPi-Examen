@@ -28,6 +28,10 @@ font-size:11px;color:#888}
 display:inline-block;animation:blink 1s steps(1) infinite}
 @keyframes blink{0%,100%{opacity:1}50%{opacity:0}}
 .stream{width:100%;display:block;background:#000;border:1px solid #444}
+.statusbar{background:#2a2a2a;border:1px solid #d2691e;margin-top:8px;padding:9px 12px;
+display:flex;align-items:center;gap:8px;font-size:12px;color:#e8c9b0}
+.statusbar .dot{width:9px;height:9px;border-radius:50%;background:#4a4;
+animation:blink 1s steps(1) infinite}
 .controls{flex:0 0 230px;display:flex;flex-direction:column;gap:6px}
 .label{font-size:11px;color:#888;text-transform:uppercase;letter-spacing:1px;margin:2px 0}
 .btn{padding:9px 0;font-family:'Courier New',monospace;
@@ -63,6 +67,8 @@ letter-spacing:1px;margin-bottom:8px}
    <div>CAM-01</div>
   </div>
   <img class="stream" src="/stream">
+  <div class="statusbar"><span class="dot" id="dot"></span>
+   Status: <span id="status">Idle</span></div>
  </div>
  <div class="controls">
   <div class="label">Tracking-modus</div>
@@ -146,6 +152,18 @@ function pick(send){
 [H,S,V].forEach(e=>e.addEventListener('input',()=>pick(true)));
 pick(false);
 
+const ST=document.getElementById('status'),DOT=document.getElementById('dot');
+setInterval(async()=>{
+ try{
+  const raw=(await (await fetch('/api/status')).text()).trim();
+  ST.textContent = raw.startsWith('ROTATING') ? 'Roterend...'
+                 : raw==='SEARCHING' ? 'Zoekt doelwit...'
+                 : raw==='IDLE' ? 'Idle' : 'Tracking';
+  DOT.style.background = raw.startsWith('ROTATING') ? '#e8821e'
+                       : raw==='SEARCHING' ? '#c44' : '#4a4';
+ }catch(e){}
+},500);
+
 </script>
 </body>
 </html>
@@ -163,6 +181,11 @@ class MJPEGServer:
         self._server: ThreadingHTTPServer | None = None
 
         self.commands: queue.Queue[str] = queue.Queue()
+
+        self.status = "IDLE"
+
+    def set_status(self, status: str) -> None:
+        self.status = status
 
     def update_frame(self, frame: cv.typing.MatLike) -> None:
         with self._lock:
@@ -215,6 +238,14 @@ class MJPEGServer:
 
                     except (BrokenPipeError, ConnectionResetError):
                         pass
+
+                elif self.path == "/api/status":
+                    body = stream.status.encode()
+                    self.send_response(200)
+                    self.send_header("Content-Type", "text/plain")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
 
                 else:
                     self.send_error(404)
