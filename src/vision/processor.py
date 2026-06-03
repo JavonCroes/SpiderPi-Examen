@@ -1,3 +1,4 @@
+import threading
 import time
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -160,6 +161,17 @@ class ColorProcessor(VisionProcessor):
         self._min_area = min_area
         self._hsv = np.empty((480, 640, 3), dtype=np.uint8)
         self._kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (9, 9))
+        self._color_lock = threading.Lock()
+
+    def set_color(
+        self,
+        lower: tuple[int, int, int],
+        upper: tuple[int, int, int],
+    ) -> None:
+        lo = np.array(lower, dtype=np.uint8)
+        hi = np.array(upper, dtype=np.uint8)
+        with self._color_lock:
+            self._lower, self._upper = lo, hi
 
     def get_error(
         self, frame: cv.typing.MatLike
@@ -167,10 +179,13 @@ class ColorProcessor(VisionProcessor):
         h, w = frame.shape[:2]
         _draw_crosshairs(frame)
 
-        cv.cvtColor(frame, cv.COLOR_BGR2HSV, dst=self._hsv)
-        mask = cv.inRange(self._hsv, self._lower, self._upper)
+        with self._color_lock:
+            lower, upper = self._lower, self._upper
 
-        # Remove noise, fill gaps
+        cv.cvtColor(frame, cv.COLOR_BGR2HSV, dst=self._hsv)
+        mask = cv.inRange(self._hsv, lower, upper)
+
+        # Remove noise fill gaps
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, self._kernel)
         mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, self._kernel)
 
