@@ -1,5 +1,6 @@
 """
 MovementController - US-04 manual control SpiderPi
+US-05 smooth walking animations
 """
 
 import queue
@@ -13,13 +14,19 @@ class MovementController:
     def __init__(self, board):
         self._board = board
 
-        # 🔥 FIX: kinematics SDK path toevoegen
+        # SpiderPi SDK
         sys.path.append(
             "/home/pi/spiderpi/spiderpi_sdk/common_sdk/common"
         )
 
         import kinematics
         self._ik = kinematics.IK(board)
+
+        # Start in neutral pose
+        self._ik.stand(
+            self._ik.initial_pos,
+            t=1000
+        )
 
         self._command_queue: queue.Queue = queue.Queue()
         self._running = True
@@ -32,7 +39,7 @@ class MovementController:
         self._worker.start()
 
     # -------------------------
-    # API
+    # Public API
     # -------------------------
 
     def forward(self, distance: int = 50):
@@ -58,7 +65,20 @@ class MovementController:
         self._command_queue.put(("shutdown", None))
 
     # -------------------------
-    # worker
+    # Animation helpers (US-05)
+    # -------------------------
+
+    def _smooth_stand(self):
+        """
+        Return smoothly to neutral pose.
+        """
+        self._ik.stand(
+            self._ik.initial_pos,
+            t=1000
+        )
+
+    # -------------------------
+    # Worker thread
     # -------------------------
 
     def _loop(self):
@@ -72,27 +92,64 @@ class MovementController:
 
             try:
                 if cmd == "forward":
-                    self._ik.go_forward(self._ik.initial_pos, 2, value, 80, 1)
+                    self._ik.go_forward(
+                        self._ik.initial_pos,
+                        2,
+                        value,
+                        60,
+                        1
+                    )
 
                 elif cmd == "backward":
-                    self._ik.back(self._ik.initial_pos, 2, value, 80, 1)
+                    self._ik.back(
+                        self._ik.initial_pos,
+                        2,
+                        value,
+                        60,
+                        1
+                    )
 
                 elif cmd == "left":
-                    self._ik.left_move(self._ik.initial_pos, 2, value, 80, 1)
+                    self._ik.left_move(
+                        self._ik.initial_pos,
+                        2,
+                        value,
+                        60,
+                        1
+                    )
 
                 elif cmd == "right":
-                    self._ik.right_move(self._ik.initial_pos, 2, value, 80, 1)
+                    self._ik.right_move(
+                        self._ik.initial_pos,
+                        2,
+                        value,
+                        60,
+                        1
+                    )
 
                 elif cmd == "turn":
                     if value == TurnDirection.LEFT:
-                        self._ik.turn_left(self._ik.initial_pos, 2, 30, 100, 1)
+                        self._ik.turn_left(
+                            self._ik.initial_pos,
+                            2,
+                            20,
+                            60,
+                            1
+                        )
                     else:
-                        self._ik.turn_right(self._ik.initial_pos, 2, 30, 100, 1)
+                        self._ik.turn_right(
+                            self._ik.initial_pos,
+                            2,
+                            20,
+                            60,
+                            1
+                        )
 
                 elif cmd == "stop":
-                    self._ik.stand(self._ik.initial_pos, t=500)
+                    self._smooth_stand()
 
                 elif cmd == "shutdown":
+                    self._smooth_stand()
                     break
 
             except Exception as e:
@@ -102,7 +159,7 @@ class MovementController:
                 self._is_moving = False
 
     # -------------------------
-    # status
+    # Status
     # -------------------------
 
     @property
