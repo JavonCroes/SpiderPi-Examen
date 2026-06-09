@@ -25,6 +25,7 @@ class PID:
         self._min, self._max = limits
 
     def clear(self) -> None:
+        # Alles op nul gebeurt bij moduswissel of als het doel weg is.
         self._integral = 0.0
         self._prev_error = 0.0
         self._first = True
@@ -33,15 +34,14 @@ class PID:
         error = self.setpoint - measurement
         self._integral += error * dt
 
-        # Anti-windup: clamp integral so Ki * integral stays within output limits
+        # Hou de opgetelde fout binnen de grenzen anders blijft hij doortikken.
         if self.Ki != 0:
             if self._max is not None:
                 self._integral = min(self._integral, self._max / self.Ki)
             if self._min is not None:
                 self._integral = max(self._integral, self._min / self.Ki)
 
-        # Skip the derivative on the first update after a clear/reset so a fresh
-        # large error doesn't produce a derivative kick that slams the output.
+        # Eerste meting na een reset geen afgeleide anders een plotse schok.
         if self._first:
             derivative = 0.0
             self._first = False
@@ -49,6 +49,7 @@ class PID:
             derivative = (error - self._prev_error) / dt
         output = self.Kp * error + self.Ki * self._integral + self.Kd * derivative
 
+        # Begrens de uitgang.
         if self._max is not None:
             output = min(output, self._max)
         if self._min is not None:

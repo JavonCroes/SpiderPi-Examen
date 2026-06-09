@@ -18,6 +18,7 @@ class TurnDirection(enum.Enum):
 
 
 class Chassis(Protocol):
+    # De gedeelde vorm zowel de echte chassis als de stub volgen dit.
     @property
     def is_moving(self) -> bool: ...
 
@@ -37,6 +38,8 @@ class ChassisController:
         self._speed = speed
         self._ik = self._make_ik(board)
 
+        # De worker-thread doet het draaien turn() en stop() geven alleen door
+        # wat hij moet doen en keren meteen terug.
         self._lock = threading.Lock()
         self._desired: TurnDirection | None = None
         self._is_moving = False
@@ -47,6 +50,8 @@ class ChassisController:
 
     @staticmethod
     def _make_ik(board):
+        # De kinematics-library bestaat alleen op de robot niet gevonden dan
+        # een ImportError zodat main.py op de stub terugvalt.
         for path in _SDK_PATHS:
             if path not in sys.path:
                 sys.path.append(path)
@@ -68,16 +73,19 @@ class ChassisController:
         return self._is_moving
 
     def turn(self, direction: TurnDirection) -> None:
+        # Geef de gewenste richting door en maak de worker wakker.
         with self._lock:
             self._desired = direction
         self._wake.set()
 
     def stop(self) -> None:
+        # Geen richting meer betekent stoppen.
         with self._lock:
             self._desired = None
         self._wake.set()
 
     def shutdown(self) -> None:
+        # Netjes afsluiten stoppen even wachten tot hij stilstaat dan klaar.
         self.stop()
         deadline = time.monotonic() + 3.0
         while self._is_moving and time.monotonic() < deadline:
@@ -87,6 +95,8 @@ class ChassisController:
         self._worker.join(timeout=1.0)
 
     def _run(self) -> None:
+        # De worker een stapje per keer en tussendoor opnieuw kijken wat er
+        # gevraagd wordt zo blijft de camera ondertussen volgen.
         while self._running:
             if not self._wake.wait(timeout=0.5):
                 continue
@@ -100,7 +110,7 @@ class ChassisController:
                 continue
             self._is_moving = True
             try:
-                # Args: posture, mode (2 = hexapod), angle (deg), speed, repeats (1).
+                # Waarden houding modus (2 = hexapod) hoek snelheid herhalingen.
                 if direction is TurnDirection.LEFT:
                     self._ik.turn_left(
                         self._ik.initial_pos, 2, self._angle, self._speed, 1
@@ -109,12 +119,13 @@ class ChassisController:
                     self._ik.turn_right(
                         self._ik.initial_pos, 2, self._angle, self._speed, 1
                     )
-            except Exception as exc:  
+            except Exception as exc:
                 print(f"Chassis turn failed: {exc}")
                 self._wake.clear()
 
 
 class StubChassis:
+    # Stub voor testen zonder robot print alleen wat hij zou doen.
     def __init__(self, board=None, angle: int = 10, speed: int = 100):
         self._angle = angle
         self._speed = speed

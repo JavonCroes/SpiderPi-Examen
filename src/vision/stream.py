@@ -44,7 +44,7 @@ background:#333;color:#999;border:1px solid #555;transition:all .1s}
 .btn.stop:hover{background:#3a2020;color:#e44;border-color:#a33}
 .row{display:flex;gap:6px}
 .row .btn{flex:1}
-/* Kleurkiezer (US-02) -- orange accent per the wireframe */
+/* Kleurkiezer oranje rand volgens de wireframe */
 .picker{margin-top:6px;border:1px solid #d2691e;background:#241c14;padding:10px}
 .picker .title{color:#e8821e;font-size:11px;font-weight:700;text-transform:uppercase;
 letter-spacing:1px;margin-bottom:8px}
@@ -52,7 +52,7 @@ letter-spacing:1px;margin-bottom:8px}
 .picker input[type=range]{flex:1;accent-color:#e8821e}
 .preview{display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:#888}
 .swatch{width:34px;height:18px;border:1px solid #666;display:inline-block}
-/* Movement buttons (US-04, Anas) -- moved to the bottom-left, not restyled */
+/* Knoppen van movement alleen verplaatst niet aangepast */
 .movement{width:100%;max-width:980px;margin-top:14px}
 .movement .grid{display:flex;gap:6px;flex-wrap:wrap}
 .movement .grid .btn{flex:0 0 96px}
@@ -67,7 +67,8 @@ letter-spacing:1px;margin-bottom:8px}
    <div>CAM-01</div>
   </div>
   <img class="stream" src="/stream">
-  <div class="statusbar"><span class="dot" id="dot"></span>
+  <!-- Statusbalk wordt elke halve seconde bijgewerkt door de JS onderaan -->
+ <div class="statusbar"><span class="dot" id="dot"></span>
    Status: <span id="status">Idle</span></div>
  </div>
  <div class="controls">
@@ -79,7 +80,8 @@ letter-spacing:1px;margin-bottom:8px}
    <button class="btn stop" onclick="reset()">Reset</button>
    <button class="btn stop" onclick="fetch('/api/quit',{method:'POST'})">Stop</button>
   </div>
-  <div class="picker">
+  <!-- Kleurkiezer de drie schuifjes voor kleur verzadiging en helderheid -->
+ <div class="picker">
    <div class="title">Kleurkiezer</div>
    <label>H <input type="range" min="0" max="179" value="115" id="h"></label>
    <label>S <input type="range" min="0" max="255" value="220" id="s"></label>
@@ -89,7 +91,7 @@ letter-spacing:1px;margin-bottom:8px}
  </div>
 </div>
 
-<!-- Movement controls (US-04, Anas) -- relocated to the bottom-left corner untouched -->
+<!-- Besturing van movement naar onderaan verplaatst code ongewijzigd -->
 <div class="movement">
  <div class="label">Besturing</div>
  <div class="grid">
@@ -104,13 +106,14 @@ letter-spacing:1px;margin-bottom:8px}
 
 <script>
 
+/* Wissel van volg-modus en markeer de actieve knop */
 function sendMode(m,el){
  fetch('/api/mode',{method:'POST',body:m});
  document.querySelectorAll('.btn').forEach(b=>b.classList.remove('active'));
  if(el) el.classList.add('active');
 }
 
-/* US-04 movement */
+/* Besturing van movement */
 let moveInterval = null;
 
 function move(dir){
@@ -131,10 +134,11 @@ function reset(){
  setTimeout(()=>location.reload(),1500);
 }
 
-/* US-02 color picker -- live, debounced POST of H,S,V to /api/color */
+/* Kleurkiezer stuurt de gekozen H,S,V live naar /api/color even wachten
+   zodat slepen niet honderden verzoeken stuurt */
 const H=document.getElementById('h'),S=document.getElementById('s'),
       V=document.getElementById('v'),SW=document.getElementById('swatch');
-function hsv2css(h,s,v){ // OpenCV ranges: h 0-179, s/v 0-255
+function hsv2css(h,s,v){ // OpenCV-bereik h 0-179 s/v 0-255
  h=h/179*360;s=s/255;v=v/255;
  const c=v*s,x=c*(1-Math.abs((h/60)%2-1)),m=v-c;let r=0,g=0,b=0;
  if(h<60){r=c;g=x}else if(h<120){r=x;g=c}else if(h<180){g=c;b=x}
@@ -152,6 +156,8 @@ function pick(send){
 [H,S,V].forEach(e=>e.addEventListener('input',()=>pick(true)));
 pick(false);
 
+/* Statuspoller haal elke 500ms de status op en zet die om naar
+   Nederlandse tekst en een gekleurd bolletje */
 const ST=document.getElementById('status'),DOT=document.getElementById('dot');
 setInterval(async()=>{
  try{
@@ -180,8 +186,10 @@ class MJPEGServer:
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
 
+        # Wachtrij met opdrachten uit de browser main.py leegt die.
         self.commands: queue.Queue[str] = queue.Queue()
 
+        # Huidige status main.py zet hem de browser haalt hem op.
         self.status = "IDLE"
 
     def set_status(self, status: str) -> None:
@@ -206,6 +214,7 @@ class MJPEGServer:
                     self.end_headers()
                     self.wfile.write(_PAGE)
 
+                # De videostream blijf JPEG-frames achter elkaar sturen.
                 elif self.path == "/stream":
                     self.send_response(200)
                     self.send_header(
@@ -239,6 +248,7 @@ class MJPEGServer:
                     except (BrokenPipeError, ConnectionResetError):
                         pass
 
+                # Huidige status als kale tekst voor de poller.
                 elif self.path == "/api/status":
                     body = stream.status.encode()
                     self.send_response(200)
@@ -254,16 +264,16 @@ class MJPEGServer:
                 length = int(self.headers.get("Content-Length", 0))
                 data = self.rfile.read(length).decode().strip()
 
-                # vision mode
+                # Volg-modus wisselen.
                 if self.path == "/api/mode":
                     if data in ("Idle", "AprilTag", "Face", "Color"):
                         stream.commands.put(data)
 
-                # movement
+                # Besturing van movement.
                 elif self.path == "/api/move":
                     stream.commands.put(data)
 
-                # color picker body is "H,S,V"
+                # Kleurkiezer de body is "H,S,V".
                 elif self.path == "/api/color":
                     stream.commands.put(f"color:{data}")
 
