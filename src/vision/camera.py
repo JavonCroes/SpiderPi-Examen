@@ -17,6 +17,8 @@ class Camera:
         self._thread: threading.Thread | None = None
 
     def _open(self) -> cv.VideoCapture:
+        # Na een USB-hik kan de camera op een ander nummer staan probeer ze af
+        # en pak de eerste die echt beeld geeft.
         for idx in [self._src, *(i for i in range(10) if i != self._src)]:
             cap = cv.VideoCapture(idx)
             if cap.isOpened():
@@ -39,6 +41,7 @@ class Camera:
         return self
 
     def _capture_loop(self) -> None:
+        # Blijf lezen lukt het lang niet dan opnieuw verbinden.
         fails = 0
         while self._running:
             ret, frame = self._cap.read()
@@ -56,6 +59,7 @@ class Camera:
                     time.sleep(0.03)
 
     def _reconnect(self) -> None:
+        # Camera losgeraakt loslaten en opnieuw openen in plaats van vastlopen.
         print("Camera: no frames, attempting reconnect...")
         try:
             self._cap.release()
@@ -67,7 +71,7 @@ class Camera:
             print("Camera: reconnected")
 
     def wait_new(self, timeout: float = 0.5) -> bool:
-        """Block until a new frame arrives. Returns False on timeout."""
+        # Wacht op een nieuw frame False bij time-out.
         if self._new_frame.wait(timeout=timeout):
             self._new_frame.clear()
             return True

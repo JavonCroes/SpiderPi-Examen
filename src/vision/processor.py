@@ -16,6 +16,7 @@ _LANDMARK = (140, 140, 140)
 
 
 def _draw_crosshairs(frame: cv.typing.MatLike) -> None:
+    # Een kruis in het midden zodat je ziet waar het doel naartoe moet.
     h, w = frame.shape[:2]
     cx, cy = w // 2, h // 2
     cv.line(frame, (cx, 0), (cx, h), _CROSSHAIR, 1)
@@ -23,11 +24,13 @@ def _draw_crosshairs(frame: cv.typing.MatLike) -> None:
 
 
 class VisionProcessor(ABC):
+    # De gedeelde vorm van elke modus wil je een nieuwe modus erf hiervan.
     @abstractmethod
     def get_error(
         self, frame: cv.typing.MatLike
     ) -> tuple[cv.typing.MatLike, float, float, bool]:
-        """Return (annotated_frame, error_x, error_y, target_found)."""
+        # Geeft terug bewerkt frame fout-x fout-y en of het doel gevonden is.
+        ...
 
 
 class AprilTagProcessor(VisionProcessor):
@@ -41,6 +44,7 @@ class AprilTagProcessor(VisionProcessor):
             decode_sharpening=0.25,
             debug=0,
         )
+        # Vaste werkbuffer 640x480 zodat we niet elk frame geheugen aanvragen.
         self._gray = np.empty((480, 640), dtype=np.uint8)
 
     def get_error(
@@ -55,6 +59,7 @@ class AprilTagProcessor(VisionProcessor):
         if not tags:
             return frame, 0, 0, False
 
+        # Bij meerdere tags pak de grootste meestal de dichtstbijzijnde.
         tag = max(tags, key=lambda t: (t.corners[2][0] - t.corners[0][0]) ** 2
                   + (t.corners[2][1] - t.corners[0][1]) ** 2) if len(tags) > 1 else tags[0]
         tx, ty = int(tag.center[0]), int(tag.center[1])
@@ -77,7 +82,7 @@ class FaceProcessor(VisionProcessor):
         Path(__file__).resolve().parent.parent
         / "face_landmarker_v2_with_blendshapes.task"
     )
-    # forehead(10), chin(152), left ear(234), right ear(454)
+    # Punten om het gezicht voorhoofd(10) kin(152) linkeroor(234) rechteroor(454).
     _BBOX_INDICES = (10, 152, 234, 454)
 
     def __init__(self, draw_landmarks: bool = False):
@@ -96,6 +101,7 @@ class FaceProcessor(VisionProcessor):
         self._landmarker = vision.FaceLandmarker.create_from_options(options)
 
     def _now_ms(self) -> int:
+        # MediaPipe in video-modus wil een tijd die altijd oploopt.
         ts = int(time.monotonic() * 1000) - self._start_ms
         if ts <= self._last_ts_ms:
             ts = self._last_ts_ms + 1
@@ -121,6 +127,7 @@ class FaceProcessor(VisionProcessor):
             for lm in landmarks:
                 cv.circle(frame, (int(lm.x * w), int(lm.y * h)), 1, _LANDMARK, -1)
 
+        # Zoek het kleinste kader om de vier punten heen en het midden ervan.
         min_x = min_y = 1.0
         max_x = max_y = 0.0
         for i in self._BBOX_INDICES:
@@ -156,11 +163,13 @@ class ColorProcessor(VisionProcessor):
         upper_hsv: tuple[int, int, int] = (130, 255, 255),
         min_area: int = 500,
     ):
+        # Start-kleur is blauw de kleurkiezer kan dit later live veranderen.
         self._lower = np.array(lower_hsv, dtype=np.uint8)
         self._upper = np.array(upper_hsv, dtype=np.uint8)
         self._min_area = min_area
         self._hsv = np.empty((480, 640, 3), dtype=np.uint8)
         self._kernel = cv.getStructuringElement(cv.MORPH_ELLIPSE, (9, 9))
+        # Slot de webthread schrijft de kleur de detectie-thread leest hem.
         self._color_lock = threading.Lock()
 
     def set_color(
@@ -168,6 +177,7 @@ class ColorProcessor(VisionProcessor):
         lower: tuple[int, int, int],
         upper: tuple[int, int, int],
     ) -> None:
+        # Nieuw kleurbereik instellen vanuit de kleurkiezer.
         lo = np.array(lower, dtype=np.uint8)
         hi = np.array(upper, dtype=np.uint8)
         with self._color_lock:
@@ -179,13 +189,14 @@ class ColorProcessor(VisionProcessor):
         h, w = frame.shape[:2]
         _draw_crosshairs(frame)
 
+        # Lees het bereik onder het slot zodat onder- en bovengrens samen passen.
         with self._color_lock:
             lower, upper = self._lower, self._upper
 
         cv.cvtColor(frame, cv.COLOR_BGR2HSV, dst=self._hsv)
         mask = cv.inRange(self._hsv, lower, upper)
 
-        # Remove noise fill gaps
+        # Ruis weghalen en gaatjes dichten.
         mask = cv.morphologyEx(mask, cv.MORPH_OPEN, self._kernel)
         mask = cv.morphologyEx(mask, cv.MORPH_CLOSE, self._kernel)
 
@@ -193,6 +204,7 @@ class ColorProcessor(VisionProcessor):
         if not contours:
             return frame, 0, 0, False
 
+        # Grootste vlek is ons doel maar negeer hele kleine die zijn ruis.
         largest = max(contours, key=cv.contourArea)
         area = cv.contourArea(largest)
         if area < self._min_area:
