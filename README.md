@@ -32,7 +32,7 @@ bash /home/pi/connect_school.sh
 pip install opencv-python mediapipe dt-apriltags 'PyTurboJPEG<2'
 ```
 
-Download het MediaPipe face model (alleen nodig voor gezichtsherkenning):
+Download het MediaPipe face model (alleen nodig als je deze repo niet gebruikt want hij zit er al in):
 ```bash
 cd /home/pi/SpiderPi-Examen/src
 wget -q https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task \
@@ -72,40 +72,13 @@ python3 src/main.py --port 8080       # Andere poort
 
 ---
 
-## 4. Projectstructuur
-
-```
-src/
-├── main.py              # RobotTracker klasse (startpunt)
-├── face_landmarker_v2_with_blendshapes.task  # AI-model (MediaPipe)
-└── vision/
-    ├── camera.py        # Camera capture in eigen thread
-    ├── pid.py           # PID controller
-    ├── processor.py     # AprilTagProcessor, FaceProcessor, ColorProcessor
-    ├── servo.py         # Gimbal aansturing (pan/tilt servo's)
-    └── stream.py        # Webinterface + MJPEG video stream + API
-```
-
----
-
-## 5. Servo Configuratie
-
-De camera gebruikt **PWM servo's** (niet de bus servo's van de poten):
-
-| Servo | ID | Richting | Bereik | Midden |
-|-------|----|----------|--------|--------|
-| Tilt | 1 | Omhoog/omlaag | 1000-2000 | 1500 |
-| Pan | 2 | Links/rechts | 500-2500 | 1500 |
-
-Communicatie via `/dev/ttyAMA0` (Hiwonder Board SDK).
-
----
-
-## 6. Documentatie
+## 4. Documentatie
 
 Zie `PROJECTDOCUMENTATIE.md` voor de volledige technische documentatie.
 
-## 7. Als je de hiwonder app weer wil gebruiken moet de spiderpi service runnen op de spider pi
+---
+
+## 5. Als je de hiwonder app weer wil gebruiken moet de spiderpi service runnen op de spider pi
 
 Die is disabled om ruimte vrij te maken voor mijn code maar je kan het checken met:
 
