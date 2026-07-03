@@ -99,6 +99,18 @@ De camera gebruikt **PWM servo's** (niet de bus servo's van de poten):
 
 Communicatie via `/dev/ttyAMA0` (Hiwonder Board SDK).
 
+## 6. Als je de hiwonder app weer wil gebruiken moet de spiderpi service runnen op de spider pi
+
+Die is disabled om ruimte vrij te maken voor mijn code maar je kan het checken met:
+
+```bash
+sudo systemctl status spiderpi 
+```
+Als het disbaled is doe dan:
+```bash
+sudo systemctl start spiderpi  
+```
+
 ---
 
 ## 6. Documentatie
